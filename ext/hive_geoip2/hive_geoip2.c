@@ -404,6 +404,90 @@ static VALUE rb_hive_geo_init(VALUE self, VALUE db_arg) {
   return Qnil;
 }
 
+static VALUE rb_hive_geo_each(VALUE self) {
+  MMDB_s *mmdb;
+
+  Data_Get_Struct(self, MMDB_s, mmdb);
+
+  if (mmdb_is_closed(mmdb)) {
+    rb_raise(rb_eIOError, "GeoIP2 - closed database");
+  }
+
+  MMDB_search_node_s *search_node;
+
+  MMDB_read_node(mmdb, 0, search_node);
+}
+
+static VALUE MMDB_read_entry(MMDB_s* mmdb, MMDB_entry_s* entry) {
+  int status;
+    MMDB_entry_data_list_s *data_list, *first;
+
+    status = MMDB_get_entry_data_list(entry, &data_list);
+
+    if (status != MMDB_SUCCESS) {
+      MMDB_free_entry_data_list(data_list);
+
+      rb_raise(rb_eRuntimeError,
+        "GeoIP2 - couldn\'t fetch results: %s", MMDB_strerror(status)
+      );
+    }
+
+    first = data_list;
+
+    int exception = 0;
+
+    VALUE ret_obj;
+
+    struct args_parse_data_list args;
+    args.data_list = data_list;
+    args.ret_obj = &ret_obj;
+
+    rb_protect(guard_parse_data_list, (VALUE)&args, &exception);
+
+    MMDB_free_entry_data_list(first);
+
+    if (exception) {
+      rb_jump_tag(exception);
+    }
+
+    return ret_obj;
+}
+
+static void MMDB_yield_result(MMDB_s* mmdb, uint64_t record, uint8_t record_type, MMDB_entry_s* record_entry) {
+//  printf("record=%i ", record);
+//  printf("record_type=%i\n", record_type);
+  switch (record_type) {
+    case MMDB_RECORD_TYPE_DATA:
+        rb_yield(MMDB_read_entry(mmdb, record_entry));
+        break;
+  }
+}
+
+static VALUE rb_hive_geo_each2(VALUE self, VALUE db_arg) {
+  Check_Type(db_arg, T_STRING);
+
+  char *db_path = StringValuePtr(db_arg);
+
+  MMDB_s mmdb;
+
+  mmdb_try_open(db_path, &mmdb);
+
+  printf("node count = %i\n", mmdb.metadata.node_count);
+
+  MMDB_search_node_s search_node;
+
+  uint64_t record = 0;
+
+//  for (int i = 0; i < 1000000; i++) {
+  for (int i = 0; i < mmdb.metadata.node_count; i++) {
+    MMDB_read_node(&mmdb, i, &search_node);
+    MMDB_yield_result(&mmdb, search_node.left_record, search_node.left_record_type, &search_node.left_record_entry);
+    MMDB_yield_result(&mmdb, search_node.right_record, search_node.right_record_type, &search_node.right_record_entry);
+  }
+
+  mmdb_close(&mmdb);
+}
+
 void Init_hive_geoip2() {
   rb_mHive = rb_define_module("Hive");
   rb_cGeoIP2 = rb_define_class_under(rb_mHive, "GeoIP2", rb_cObject);
@@ -411,9 +495,11 @@ void Init_hive_geoip2() {
   rb_define_alloc_func(rb_cGeoIP2, rb_hive_geo_alloc);
   
   rb_define_singleton_method(rb_cGeoIP2, "lookup", rb_hive_geo_lookup2, 2);
-  
+  rb_define_singleton_method(rb_cGeoIP2, "each", rb_hive_geo_each2, 1);
+
   rb_define_method(rb_cGeoIP2, "initialize", rb_hive_geo_init, 1);
   rb_define_method(rb_cGeoIP2, "close", rb_hive_geo_close, 0);
   rb_define_method(rb_cGeoIP2, "closed?", rb_hive_geo_is_closed, 0);
   rb_define_method(rb_cGeoIP2, "lookup", rb_hive_geo_lookup, 1);
+  rb_define_method(rb_cGeoIP2, "each", rb_hive_geo_each, 0);
 }

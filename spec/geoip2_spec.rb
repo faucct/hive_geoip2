@@ -26,6 +26,14 @@ class GeoIP2Spec < MiniTest::Spec
   }
   
   @@res = GeoIP2.lookup('88.174.0.0', "#{ROOT}/database.mmdb")
+
+  describe '.each' do
+    it do
+      GeoIP2.each("#{__dir__}/GeoIP2-City.mmdb") do |a|
+        # p a
+      end
+    end
+  end
   
   describe GeoIP2 do
     it 'parses int32' do
